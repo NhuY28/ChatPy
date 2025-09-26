@@ -1,6 +1,7 @@
+#ChatServer.py
 import socket
 import threading
-import mysql.connector
+import pymysql
 
 HOST = "0.0.0.0"
 PORT = 2025
@@ -8,11 +9,13 @@ PORT = 2025
 clients = []
 
 # --- KẾT NỐI DATABASE ---
-db = mysql.connector.connect(
+db = pymysql.connect(
     host="localhost",
-    user="root",        # mặc định của XAMPP
-    password="",        # để trống nếu chưa đặt mật khẩu MySQL
-    database="chatpy"
+    user="root",
+    password="",
+    database="chatpy",
+    charset="utf8mb4",
+    cursorclass=pymysql.cursors.DictCursor
 )
 cursor = db.cursor()
 
@@ -20,16 +23,14 @@ def handle_client(conn, addr):
     print(f"[KẾT NỐI] {addr} đã kết nối")
     try:
         while True:
-            msg = conn.recv(1024).decode("utf-8")
-            if not msg:
+            header = conn.recv(1024).decode("utf-8")
+            if not header:
                 break
 
-            print(f"{addr}: {msg}")
-
-            parts = msg.split("|")
+            parts = header.split("|")
             cmd = parts[0]
 
-            # --- Xử lý đăng ký ---
+            # --- Đăng ký ---
             if cmd == "REGISTER":
                 username, password = parts[1], parts[2]
                 try:
@@ -39,7 +40,7 @@ def handle_client(conn, addr):
                 except:
                     conn.send("REGISTER_FAIL".encode("utf-8"))
 
-            # --- Xử lý đăng nhập ---
+            # --- Đăng nhập ---
             elif cmd == "LOGIN":
                 username, password = parts[1], parts[2]
                 cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
@@ -49,10 +50,44 @@ def handle_client(conn, addr):
                 else:
                     conn.send("LOGIN_FAIL".encode("utf-8"))
 
-            # --- Chat bình thường ---
+            # --- Chat text ---
             elif cmd == "MSG":
-                text = parts[1]
-                broadcast(f"{addr}: {text}", conn)
+                sender, text = parts[1], parts[2]
+                cursor.execute("INSERT INTO messages (sender, msg_type, content) VALUES (%s, 'TEXT', %s)", (sender, text))
+                db.commit()
+                broadcast(f"{sender}: {text}", conn)
+
+            # --- Gửi ảnh ---
+            elif cmd == "IMAGE":
+                sender, filename, size = parts[1], parts[2], int(parts[3])
+                data = b""
+                while len(data) < size:
+                    packet = conn.recv(4096)
+                    if not packet:
+                        break
+                    data += packet
+                cursor.execute(
+                    "INSERT INTO messages (sender, msg_type, content, filename) VALUES (%s, 'IMAGE', %s, %s)",
+                    (sender, data, filename)
+                )
+                db.commit()
+                broadcast(f"{sender} đã gửi ảnh: {filename}", conn)
+
+            # --- Gửi file ---
+            elif cmd == "FILE":
+                sender, filename, size = parts[1], parts[2], int(parts[3])
+                data = b""
+                while len(data) < size:
+                    packet = conn.recv(4096)
+                    if not packet:
+                        break
+                    data += packet
+                cursor.execute(
+                    "INSERT INTO messages (sender, msg_type, content, filename) VALUES (%s, 'FILE', %s, %s)",
+                    (sender, data, filename)
+                )
+                db.commit()
+                broadcast(f"{sender} đã gửi file: {filename}", conn)
 
     except Exception as e:
         print(f"Lỗi: {e}")
