@@ -1,14 +1,12 @@
 import os
 import tkinter as tk
 from tkinter import messagebox, filedialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 from ChatClient import ChatClient
 
 
 class ChatGUI:
     def __init__(self, root=None):
-        # Nếu root không truyền vào => tạo Tk() chính
-        self.is_main = False
         if root is None:
             self.root = tk.Tk()
             self.is_main = True
@@ -16,13 +14,13 @@ class ChatGUI:
             self.root = tk.Toplevel(root)
 
         self.root.title("ChatPy - Đăng nhập/Đăng ký")
-        self.root.geometry("600x500")
+        self.root.geometry("800x500")
         self.root.config(bg="#f5f5f5")
 
         self.client = ChatClient()
         self.username = None
         self.avatar_path = None
-
+        self.user_avatars = {}
 
         # --- Load icon ảnh ---
         self.icon_user = ImageTk.PhotoImage(Image.open("username.png").resize((20, 20)))
@@ -42,20 +40,14 @@ class ChatGUI:
                              font=("Arial", 18, "bold"), bg="#f5f5f5", fg="#333")
         lbl_title.pack(pady=20)
 
-
         # --- AVATAR ---
         self.avatar_frame = tk.Frame(self.root, bg="#f5f5f5")
         self.avatar_frame.pack(pady=10)
 
-        # Label chứa avatar (mặc định là icon folder/camera)
         self.avatar_image = ImageTk.PhotoImage(Image.open("folder.png").resize((20, 20)))
         self.avatar_label = tk.Label(self.avatar_frame, image=self.avatar_image, bg="#f5f5f5", cursor="hand2")
         self.avatar_label.pack()
-
-        # Bind click để chọn ảnh
         self.avatar_label.bind("<Button-1>", lambda e: self.choose_avatar())
-
-
 
         # Username
         frame_user = tk.Frame(self.root, bg="#f5f5f5")
@@ -74,11 +66,10 @@ class ChatGUI:
         # Confirm password
         frame_confirm = tk.Frame(self.root, bg="#f5f5f5")
         frame_confirm.pack(pady=10, padx=40, fill="x")
-        tk.Label(frame_confirm,  image=self.icon_pass, font=("Arial", 14), bg="#f5f5f5").pack(side="left", padx=5)
+        tk.Label(frame_confirm, image=self.icon_pass, font=("Arial", 14), bg="#f5f5f5").pack(side="left", padx=5)
         self.entry_confirm = tk.Entry(frame_confirm, font=("Arial", 16), show="*")
         self.entry_confirm.pack(side="left", fill="x", expand=True)
 
-        # Button đăng ký
         btn_register = tk.Button(self.root, text="Đăng ký", bg="#6a5acd", fg="white",
                                  font=("Arial", 12, "bold"),
                                  command=self.do_register)
@@ -96,12 +87,11 @@ class ChatGUI:
         if pw != cf:
             messagebox.showerror("Lỗi", "Mật khẩu không khớp!")
             return
-        avatar = self.avatar_path if self.avatar_path else "default.png"
+        avatar = self.avatar_path if self.avatar_path else "avatars/default.jpg"
 
         self.client.connect()
         self.client.on_message = self.handle_server_message
         self.client.register(user, pw, avatar)
-
 
     def choose_avatar(self):
         file = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
@@ -109,9 +99,7 @@ class ChatGUI:
             img = Image.open(file).resize((90, 90))
             self.avatar_image = ImageTk.PhotoImage(img)
             self.avatar_label.config(image=self.avatar_image)
-            self.avatar_path = file   # Lưu đường dẫn để dùng khi đăng ký
-
-
+            self.avatar_path = file
 
     # ------------------- ĐĂNG NHẬP -------------------
     def show_login(self):
@@ -121,21 +109,18 @@ class ChatGUI:
                              font=("Arial", 18, "bold"), bg="#f5f5f5", fg="#333")
         lbl_title.pack(pady=20)
 
-        # Username
         frame_user = tk.Frame(self.root, bg="#f5f5f5")
         frame_user.pack(pady=10, padx=40, fill="x")
         tk.Label(frame_user, image=self.icon_user, bg="#f5f5f5").pack(side="left", padx=5)
         self.login_user = tk.Entry(frame_user, font=("Arial", 12))
         self.login_user.pack(side="left", fill="x", expand=True)
 
-        # Password
         frame_pass = tk.Frame(self.root, bg="#f5f5f5")
         frame_pass.pack(pady=10, padx=40, fill="x")
         tk.Label(frame_pass, image=self.icon_pass, bg="#f5f5f5").pack(side="left", padx=5)
         self.login_pass = tk.Entry(frame_pass, font=("Arial", 12), show="*")
         self.login_pass.pack(side="left", fill="x", expand=True)
 
-        # Button đăng nhập
         btn_login = tk.Button(self.root, text="Đăng nhập", bg="#228B22", fg="white",
                               font=("Arial", 12, "bold"),
                               command=self.do_login)
@@ -159,18 +144,38 @@ class ChatGUI:
         self.clear_window()
         self.root.title(f"ChatPy - {self.username}")
 
-        # Hiển thị avatar user (nếu có)
-        if self.avatar_path and os.path.exists(self.avatar_path):
-            img = Image.open(self.avatar_path).resize((50, 50))
-            self.chat_avatar = ImageTk.PhotoImage(img)
-            tk.Label(self.root, image=self.chat_avatar).pack(pady=5)
+        main_frame = tk.Frame(self.root, bg="#f5f5f5")
+        main_frame.pack(fill="both", expand=True)
 
-        self.text_area = tk.Text(self.root, state="disabled",
-                                 wrap="word", bg="white")
-        self.text_area.pack(padx=10, pady=10, fill="both", expand=True)
+        # Danh sách user online
+        self.user_frame = tk.Frame(main_frame, width=180, bg="#e0e0e0")
+        self.user_frame.pack(side="left", fill="y", padx=5, pady=5)
+        tk.Label(self.user_frame, text="Online", bg="#e0e0e0", font=("Arial", 12, "bold")).pack(pady=5)
+        self.user_listbox = tk.Listbox(self.user_frame)
+        self.user_listbox.pack(fill="both", expand=True, padx=5, pady=5)
 
+        # Khung chat chính
+        chat_frame = tk.Frame(main_frame, bg="#f5f5f5")
+        chat_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
+
+        self.chat_canvas = tk.Canvas(chat_frame, bg="#f5f5f5", highlightthickness=0)
+        self.chat_scrollbar = tk.Scrollbar(chat_frame, orient="vertical", command=self.chat_canvas.yview)
+        self.chat_canvas.configure(yscrollcommand=self.chat_scrollbar.set)
+
+        self.chat_scrollbar.pack(side="right", fill="y")
+        self.chat_canvas.pack(side="left", fill="both", expand=True)
+
+        self.chat_inner = tk.Frame(self.chat_canvas, bg="#f5f5f5")
+        self.chat_canvas.create_window((0, 0), window=self.chat_inner, anchor="nw")
+        self.chat_inner.bind("<Configure>", lambda e: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all")))
+
+        # Frame chứa tin nhắn
+        self.messages_frame = tk.Frame(self.chat_inner, bg="#f5f5f5")
+        self.messages_frame.pack(fill="both", expand=True)
+
+        # Ô nhập tin nhắn
         frame_bottom = tk.Frame(self.root)
-        frame_bottom.pack(fill="x", padx=10, pady=5)
+        frame_bottom.pack(fill="x", padx=5, pady=5)
 
         self.entry_msg = tk.Entry(frame_bottom, font=("Arial", 12))
         self.entry_msg.pack(side="left", fill="x", expand=True, padx=5)
@@ -185,28 +190,77 @@ class ChatGUI:
         btn_file = tk.Button(frame_bottom, text="📂 File", command=self.send_file)
         btn_file.pack(side="left", padx=5)
 
+    # ------------------- Gửi tin nhắn -------------------
     def send_message(self):
         text = self.entry_msg.get()
         if text.strip():
             self.client.send_message(self.username, text)
+            self.show_message(self.username, text, self.avatar_path)
             self.entry_msg.delete(0, tk.END)
 
     def send_image(self):
-        filepath = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.gif")])
+        filepath = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.gif")])
         if filepath:
             self.client.send_image(self.username, filepath)
+            self.show_message(self.username, f"Đã gửi ảnh: {os.path.basename(filepath)}", self.avatar_path)
 
     def send_file(self):
         filepath = filedialog.askopenfilename()
         if filepath:
             self.client.send_file(self.username, filepath)
+            self.show_message(self.username, f"Đã gửi file: {os.path.basename(filepath)}", self.avatar_path)
 
-    def show_message(self, msg):
-        self.text_area.config(state="normal")
-        self.text_area.insert("end", msg + "\n")
-        self.text_area.config(state="disabled")
-        self.text_area.see("end")
+    # ------------------- Tạo avatar hình tròn -------------------
+    def create_circle_avatar(self, path, size=40):
+        if not os.path.exists(path):
+            img = Image.new("RGB", (size, size), color="#cccccc")
+        else:
+            img = Image.open(path).resize((size, size))
+        mask = Image.new("L", img.size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0, size, size), fill=255)
+        img.putalpha(mask)
+        return ImageTk.PhotoImage(img)
+
+    # ------------------- Hiển thị tin nhắn -------------------
+    def show_message(self, sender, msg, avatar_path=None):
+        # Frame bọc ngang đủ width
+        outer_frame = tk.Frame(self.messages_frame, bg="#f5f5f5")
+        outer_frame.pack(fill="x", pady=10)
+
+        # Frame chứa avatar + bong bóng
+        msg_frame = tk.Frame(outer_frame, bg="#f5f5f5")
+
+        if avatar_path and os.path.exists(avatar_path):
+            avatar_img = self.create_circle_avatar(avatar_path, size=40)
+        else:
+            avatar_img = self.create_circle_avatar("avatars/default.jpg", size=40)
+
+        lbl_avatar = tk.Label(msg_frame, image=avatar_img, bg="#f5f5f5")
+        lbl_avatar.image = avatar_img
+
+        if sender == self.username:
+            # Tin nhắn của mình (căn phải)
+            lbl_msg = tk.Label(msg_frame, text=msg, bg="#d1ffd6", wraplength=300,
+                               justify="left", padx=10, pady=5, relief="solid", bd=1)
+            lbl_msg.pack(side="right", padx=5)
+            lbl_avatar.pack(side="right")
+            lbl_name = tk.Label(msg_frame, text=sender, font=("Arial", 9, "bold"), bg="#f5f5f5")
+            lbl_name.pack(anchor="e")
+            msg_frame.pack(anchor="e", padx=20)
+
+        else:
+            # Tin nhắn người khác (căn trái)
+            lbl_msg = tk.Label(msg_frame, text=msg, bg="#f0f0f0", wraplength=300,
+                               justify="left", padx=10, pady=5, relief="solid", bd=1)
+            lbl_avatar.pack(side="left")
+            lbl_msg.pack(side="left", padx=5)
+            lbl_name = tk.Label(msg_frame, text=sender, font=("Arial", 9, "bold"), bg="#f5f5f5")
+            lbl_name.pack(anchor="w")
+            msg_frame.pack(anchor="w", padx=20)
+
+        self.chat_canvas.update_idletasks()
+        self.chat_canvas.yview_moveto(1.0)
 
     # ------------------- XỬ LÝ SERVER TRẢ VỀ -------------------
     def handle_server_message(self, msg):
@@ -221,17 +275,24 @@ class ChatGUI:
         elif msg.startswith("LOGIN_OK"):
             parts = msg.split("|")
             if len(parts) > 1:
-                self.avatar_path = parts[1]   # lấy avatar từ DB
+                self.avatar_path = parts[1]
+                self.user_avatars[self.username] = self.avatar_path
             self.root.after(0, lambda: [
                 messagebox.showinfo("Thành công", "Đăng nhập thành công!"),
                 self.show_chat()
             ])
-        elif msg == "LOGIN_FAIL":
-            self.root.after(0, lambda: messagebox.showerror("Lỗi", "Sai tài khoản hoặc mật khẩu!"))
-
+        elif msg.startswith("MSG|"):
+            parts = msg.split("|", 2)
+            if len(parts) == 3:
+                sender, content = parts[1], parts[2]
+                avatar = self.user_avatars.get(sender, "avatars/default.jpg")
+                self.root.after(0, lambda: self.show_message(sender, content, avatar))
+        elif msg.startswith("USER_AVATAR|"):
+            parts = msg.split("|")
+            if len(parts) == 3:
+                self.user_avatars[parts[1]] = parts[2]
         else:
-            self.root.after(0, lambda: self.show_message(msg))
-
+            self.root.after(0, lambda: self.show_message("Server", msg))
 
     # ------------------- TIỆN ÍCH -------------------
     def clear_window(self):
