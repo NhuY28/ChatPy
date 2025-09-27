@@ -19,11 +19,12 @@ class ChatClient:
         thread = threading.Thread(target=self.receive_loop, daemon=True)
         thread.start()
 
+    def register(self, username, password, avatar):
+        self.send(f"REGISTER|{username}|{password}|{avatar}")
+
     def login(self, username, password):
         self.send(f"LOGIN|{username}|{password}")
 
-    def register(self, username, password):
-        self.send(f"REGISTER|{username}|{password}")
 
     def send_message(self, username, text):
         self.send(f"MSG|{username}|{text}")

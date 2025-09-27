@@ -32,21 +32,26 @@ def handle_client(conn, addr):
 
             # --- Đăng ký ---
             if cmd == "REGISTER":
-                username, password = parts[1], parts[2]
+                username, password, avatar = parts[1], parts[2], parts[3]
                 try:
-                    cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, password))
+                    cursor.execute(
+                        "INSERT INTO users (username, password, avatar) VALUES (%s, %s, %s)",
+                        (username, password, avatar)
+                    )
                     db.commit()
                     conn.send("REGISTER_OK".encode("utf-8"))
-                except:
+                except Exception as e:
+                    print("Đăng ký lỗi:", e)
                     conn.send("REGISTER_FAIL".encode("utf-8"))
 
-            # --- Đăng nhập ---
+
+        # --- Đăng nhập ---
             elif cmd == "LOGIN":
                 username, password = parts[1], parts[2]
                 cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
                 result = cursor.fetchone()
                 if result:
-                    conn.send("LOGIN_OK".encode("utf-8"))
+                    conn.send(f"LOGIN_OK|{result['avatar']}".encode("utf-8"))
                 else:
                     conn.send("LOGIN_FAIL".encode("utf-8"))
 
