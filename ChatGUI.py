@@ -26,7 +26,12 @@ class ChatGUI:
         self.pending_users = []   # if update arrives before UI created
         self.current_chat_user = None
 
+        # Quản lý nhiều khung chat
+        self.chat_frames = {}     # username -> Frame
+        self.unread_count = {}    # username -> số tin chưa đọc
+
         # --- Load icon ---
+        # Ensure these files exist or replace with your own icons
         self.icon_user = ImageTk.PhotoImage(Image.open("username.png").resize((20, 20)))
         self.icon_pass = ImageTk.PhotoImage(Image.open("password.png").resize((20, 20)))
         self.icon_folder = ImageTk.PhotoImage(Image.open("folder.png").resize((20, 20)))
@@ -92,8 +97,10 @@ class ChatGUI:
             return
         avatar = self.avatar_path if self.avatar_path else "avatars/default.jpg"
 
+        # connect and register
         self.client.connect()
         self.client.on_message = self.handle_server_message
+        # original ChatClient.register expects "REGISTER|user|pw\n"
         self.client.register(user, pw, avatar)
 
     def choose_avatar(self):
@@ -148,8 +155,9 @@ class ChatGUI:
 
         main_frame = tk.Frame(self.root, bg="#f5f5f5")
         main_frame.pack(fill="both", expand=True)
-            # --- Header ---
-        self.header_label = tk.Label(chat_frame, text="Chọn người để chat",
+
+        # --- Header ---
+        self.header_label = tk.Label(main_frame, text="Chọn người để chat",
                                      font=("Arial", 12, "bold"), bg="#ddd", anchor="w")
         self.header_label.pack(fill="x")
 
@@ -178,10 +186,6 @@ class ChatGUI:
         self.chat_canvas.create_window((0, 0), window=self.chat_inner, anchor="nw")
         self.chat_inner.bind("<Configure>", lambda e: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all")))
 
-        # Frame chứa tin nhắn
-        self.messages_frame = tk.Frame(self.chat_inner, bg="#f5f5f5")
-        self.messages_frame.pack(fill="both", expand=True)
-
         # Ô nhập tin nhắn ở dưới cùng
         frame_bottom = tk.Frame(self.root, bg="#ddd")
         frame_bottom.pack(fill="x", padx=5, pady=5)
@@ -198,28 +202,27 @@ class ChatGUI:
         btn_file = tk.Button(frame_bottom, text="📂 File", command=self.send_file)
         btn_file.pack(side="left", padx=5)
 
-        # nếu có pending_users (server đã gửi trước đó), render bây giờ
+        # If server already sent user list earlier, render it now
         if self.pending_users:
             self.update_user_list(self.pending_users)
             self.pending_users = []
 
     # ------------------- Cập nhật danh sách user online -------------------
     def update_user_list(self, users):
-        # lưu luôn danh sách hiện tại
         self.current_users = users
 
-        # Nếu UI chưa tạo (user_list_container chưa tồn tại) -> lưu pending và return
+        # If UI not ready yet -> store pending
         if not hasattr(self, "user_list_container"):
             self.pending_users = users
             return
 
-        # Xóa cũ rồi render lại
+        # Clear and render
         for widget in self.user_list_container.winfo_children():
             widget.destroy()
 
         for u in users:
             if u == self.username:
-                continue  # Không hiển thị chính mình
+                continue
 
             frame = tk.Frame(self.user_list_container, bg="#e0e0e0", pady=5)
             frame.pack(fill="x", padx=5, pady=2)
@@ -233,7 +236,13 @@ class ChatGUI:
             lbl_name = tk.Label(frame, text=u, bg="#e0e0e0", font=("Arial", 11))
             lbl_name.pack(side="left", padx=6)
 
-            # Khi nhấn vào user thì chọn chat với họ
+            # Badge số tin nhắn chưa đọc
+            count = self.unread_count.get(u, 0)
+            if count > 0:
+                lbl_notify = tk.Label(frame, text=str(count), fg="white", bg="red", font=("Arial", 9, "bold"))
+                lbl_notify.pack(side="right", padx=5)
+
+            # Bind click to the whole row
             frame.bind("<Button-1>", lambda e, user=u: self.select_chat_user(user))
             lbl_avatar.bind("<Button-1>", lambda e, user=u: self.select_chat_user(user))
             lbl_name.bind("<Button-1>", lambda e, user=u: self.select_chat_user(user))
@@ -244,6 +253,24 @@ class ChatGUI:
         self.root.title(f"ChatPy - {self.username} (chat với {user})")
         self.header_label.config(text=f"{user} - Đang hoạt động")
 
+        # Hide all chat frames
+        for f in self.chat_frames.values():
+            f.pack_forget()
+
+        # Ensure frame exists for this user
+        if user not in self.chat_frames:
+            frame = tk.Frame(self.chat_inner, bg="#f5f5f5")
+            frame.pack(fill="both", expand=True)
+            self.chat_frames[user] = frame
+        else:
+            self.chat_frames[user].pack(fill="both", expand=True)
+
+        # Set current messages_frame to selected user's frame
+        self.messages_frame = self.chat_frames[user]
+
+        # Reset unread count and refresh list
+        self.unread_count[user] = 0
+        self.update_user_list(self.current_users)
 
     # ------------------- Gửi tin nhắn -------------------
     def send_message(self):
@@ -251,30 +278,61 @@ class ChatGUI:
         if not text:
             return
 
-        # Nếu có chat riêng
         if self.current_chat_user:
-            self.client.send_private_message(self.current_chat_user, text)
+            # send private message to the selected user
+            try:
+                self.client.send_private_message(self.current_chat_user, text)
+            except Exception:
+                # In case ChatClient doesn't implement send_private_message in your version
+                try:
+                    self.client.send(f"PRIVATE|{self.current_chat_user}|{text}\n")
+                except Exception:
+                    pass
+
+            # show locally in the correct chat frame
+            self.show_message(self.username, text, self.avatar_path, target_user=self.current_chat_user)
+
         else:
-            self.client.send_message("ALL", text)
+            # no selected user -> broadcast (if supported)
+            try:
+                self.client.send_message(text)
+            except Exception:
+                try:
+                    self.client.send(f"MSG|{self.username}|{text}\n")
+                except Exception:
+                    pass
+            # Show in ALL frame
+            self.show_message(self.username, text, self.avatar_path, target_user="ALL")
 
-        self.show_message(self.username, text, self.avatar_path)
         self.entry_msg.delete(0, tk.END)
-
-
 
     def send_image(self):
         filepath = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.gif")])
         if filepath:
-            target = self.current_chat_user if self.current_chat_user else self.username
-            self.client.send_image(target, filepath)
-            self.show_message(self.username, f"Đã gửi ảnh: {os.path.basename(filepath)}", self.avatar_path)
+            target = self.current_chat_user if self.current_chat_user else "ALL"
+            # try to call client method if available
+            try:
+                self.client.send_image(target, filepath)
+            except Exception:
+                # fallback: send an indicator text if client doesn't support binary/image send
+                try:
+                    self.client.send(f"IMG|{target}|{os.path.basename(filepath)}\n")
+                except Exception:
+                    pass
+            self.show_message(self.username, f"Đã gửi ảnh: {os.path.basename(filepath)}", self.avatar_path, target_user=target)
 
     def send_file(self):
         filepath = filedialog.askopenfilename()
         if filepath:
-            target = self.current_chat_user if self.current_chat_user else self.username
-            self.client.send_file(target, filepath)
-            self.show_message(self.username, f"Đã gửi file: {os.path.basename(filepath)}", self.avatar_path)
+            target = self.current_chat_user if self.current_chat_user else "ALL"
+            try:
+                self.client.send_file(target, filepath)
+            except Exception:
+                try:
+                    self.client.send(f"FILE|{target}|{os.path.basename(filepath)}\n")
+                except Exception:
+                    pass
+            self.show_message(self.username, f"Đã gửi file: {os.path.basename(filepath)}", self.avatar_path, target_user=target)
 
     # ------------------- Avatar hình tròn -------------------
     def create_circle_avatar(self, path, size=40):
@@ -282,6 +340,9 @@ class ChatGUI:
             img = Image.new("RGB", (size, size), color="#cccccc")
         else:
             img = Image.open(path).resize((size, size))
+        # ensure alpha channel
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
         mask = Image.new("L", img.size, 0)
         draw = ImageDraw.Draw(mask)
         draw.ellipse((0, 0, size, size), fill=255)
@@ -289,50 +350,88 @@ class ChatGUI:
         return ImageTk.PhotoImage(img)
 
     # ------------------- Hiển thị tin nhắn -------------------
-    def show_message(self, sender, msg, avatar_path=None):
-        # Nếu messages_frame chưa khởi tạo (chưa vào chat) thì bỏ qua
-        if not hasattr(self, "messages_frame"):
-            return
+    def show_message(self, sender, msg, avatar_path=None, target_user=None):
+        if not target_user:
+            target_user = self.current_chat_user or "ALL"
 
-        outer_frame = tk.Frame(self.messages_frame, bg="#f5f5f5")
-        outer_frame.pack(fill="x", pady=5)
+        if target_user not in self.chat_frames:
+            frame = tk.Frame(self.chat_inner, bg="#f5f5f5")
+            self.chat_frames[target_user] = frame
 
-        msg_frame = tk.Frame(outer_frame, bg="#f5f5f5")
+        frame = self.chat_frames[target_user]
 
-        # Avatar
+        # Nếu là khung đang mở thì show ra
+        if getattr(self, "messages_frame", None) is frame:
+            if not frame.winfo_ismapped():
+                frame.pack(fill="both", expand=True)
+
+        outer_frame = tk.Frame(frame, bg="#f5f5f5")
+        outer_frame.pack(fill="x", pady=5, padx=10, anchor="w")
+
+        # Ảnh đại diện
         if avatar_path and os.path.exists(avatar_path):
-            avatar_img = self.create_circle_avatar(avatar_path, size=40)
+            avatar_img = self.create_circle_avatar(avatar_path, size=36)
         else:
-            avatar_img = self.create_circle_avatar("avatars/default.jpg", size=40)
+            avatar_img = self.create_circle_avatar("avatars/default.jpg", size=36)
 
-        lbl_avatar = tk.Label(msg_frame, image=avatar_img, bg="#f5f5f5")
-        lbl_avatar.image = avatar_img
-
-        # Bong bóng
-        bubble_color = "#d1ffd6" if sender == self.username else "#f0f0f0"
-        lbl_msg = tk.Label(
-            msg_frame, text=msg, bg=bubble_color, wraplength=500,
-            justify="left", padx=10, pady=5, relief="solid", bd=1
-        )
-
-        lbl_name = tk.Label(msg_frame, text=sender, font=("Arial", 9, "bold"), bg="#f5f5f5")
-
+        # --- Tin nhắn của chính mình ---
         if sender == self.username:
-            lbl_name.pack(anchor="e")
-            lbl_msg.pack(side="right", padx=5)
-            lbl_avatar.pack(side="right")
-            msg_frame.pack(anchor="e", padx=10)
-        else:
-            lbl_name.pack(anchor="w")
-            lbl_avatar.pack(side="left")
-            lbl_msg.pack(side="left", padx=5)
-            msg_frame.pack(anchor="w", padx=10)
+            msg_container = tk.Frame(outer_frame, bg="#f5f5f5")
+            msg_container.pack(anchor="e", fill="x")
 
-        self.chat_canvas.update_idletasks()
-        self.chat_canvas.yview_moveto(1.0)
+            lbl_name = tk.Label(msg_container, text=sender, font=("Arial", 9, "bold"), bg="#f5f5f5", fg="#555")
+            lbl_name.pack(anchor="e", padx=5)
+
+            content_frame = tk.Frame(msg_container, bg="#f5f5f5")
+            content_frame.pack(anchor="e")
+
+            lbl_msg = tk.Label(
+                content_frame, text=msg, bg="#d1ffd6", wraplength=400,
+                justify="left", padx=10, pady=6, relief="solid", bd=1
+            )
+            lbl_msg.pack(side="right", padx=5)
+
+            lbl_avatar = tk.Label(content_frame, image=avatar_img, bg="#f5f5f5")
+            lbl_avatar.image = avatar_img
+            lbl_avatar.pack(side="right")
+
+        # --- Tin nhắn của đối phương ---
+        else:
+            msg_container = tk.Frame(outer_frame, bg="#f5f5f5")
+            msg_container.pack(anchor="w", fill="x")
+
+            lbl_name = tk.Label(msg_container, text=sender, font=("Arial", 9, "bold"), bg="#f5f5f5", fg="#333")
+            lbl_name.pack(anchor="w", padx=5)
+
+            content_frame = tk.Frame(msg_container, bg="#f5f5f5")
+            content_frame.pack(anchor="w")
+
+            lbl_avatar = tk.Label(content_frame, image=avatar_img, bg="#f5f5f5")
+            lbl_avatar.image = avatar_img
+            lbl_avatar.pack(side="left")
+
+            lbl_msg = tk.Label(
+                content_frame, text=msg, bg="#f0f0f0", wraplength=400,
+                justify="left", padx=10, pady=6, relief="solid", bd=1
+            )
+            lbl_msg.pack(side="left", padx=5)
+
+        # scroll xuống cuối
+        try:
+            self.chat_canvas.update_idletasks()
+            self.chat_canvas.yview_moveto(1.0)
+        except Exception:
+            pass
 
     # ------------------- Server trả về -------------------
     def handle_server_message(self, msg):
+        # This handler assumes server sends plain strings like:
+        # REGISTER_OK, REGISTER_FAIL, LOGIN_OK|avatar_path, LOGIN_FAIL
+        # USER_LIST|user1|user2|...
+        # PRIVATE|sender|text
+        # MSG|sender|text   (broadcast)
+        # adapt to your server protocol accordingly
+
         if msg == "REGISTER_OK":
             self.root.after(0, lambda: [
                 messagebox.showinfo("Thành công", "Đăng ký thành công!"),
@@ -353,24 +452,60 @@ class ChatGUI:
             self.root.after(0, lambda: messagebox.showerror("Lỗi", "Sai tài khoản hoặc mật khẩu!"))
             return
 
+        if msg.startswith("PRIVATE|"):
+            # PRIVATE|sender|text
+            try:
+                _, sender, text = msg.split("|", 2)
+            except ValueError:
+                # malformed message: show raw
+                self.root.after(0, lambda: self.show_message("Server", msg))
+                return
+
+            target = sender  # private messages belong to conversation with 'sender'
+
+            # If the conversation is not currently open, increment unread
+            if self.current_chat_user != target:
+                self.unread_count[target] = self.unread_count.get(target, 0) + 1
+                self.root.after(0, lambda: self.update_user_list(self.current_users))
+
+            # Show message in correct conversation frame
+            self.root.after(0, lambda: self.show_message(sender, text, self.user_avatars.get(sender), target_user=target))
+            return
+
         if msg.startswith("MSG|"):
-            _, sender, text = msg.split("|", 2)
-            self.root.after(0, lambda: self.show_message(sender, text, self.user_avatars.get(sender)))
+            # broadcast message to ALL
+            try:
+                _, sender, text = msg.split("|", 2)
+            except ValueError:
+                self.root.after(0, lambda: self.show_message("Server", msg))
+                return
+            self.root.after(0, lambda: self.show_message(sender, text, self.user_avatars.get(sender), target_user="ALL"))
             return
 
         if msg.startswith("USER_LIST|"):
             parts = msg.split("|")[1:]
+            # update known avatars mapping? depends on server sending avatar info separately.
             self.root.after(0, lambda: self.update_user_list(parts))
             return
 
-
-        # fallback: show raw server text
-        self.root.after(0, lambda: self.show_message("Server", msg))
+        # fallback: show raw server text in an "ALL" conversation (or server frame)
+        self.root.after(0, lambda: self.show_message("Server", msg, target_user="ALL"))
 
     # ------------------- Tiện ích -------------------
     def clear_window(self):
         for widget in self.root.winfo_children():
             widget.destroy()
+
+    # optional helper to gracefully close client socket if GUI is closed
+    def close(self):
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
