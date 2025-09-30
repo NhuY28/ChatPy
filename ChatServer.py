@@ -169,6 +169,33 @@ def handle_image(parts, conn):
             except:
                 pass
 
+def handle_file(parts, conn):
+    if len(parts) < 4:
+        return
+    target, filename, b64_data = parts[1], parts[2], parts[3]
+    sender = clients[conn]["username"]
+
+    if target.upper() == "ALL":
+        with clients_lock:
+            for c in clients.keys():
+                if c != conn:
+                    try:
+                        c.sendall(f"FILE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
+                    except:
+                        pass
+    else:
+        target_conn = None
+        with clients_lock:
+            for c, info in clients.items():
+                if info["username"] == target:
+                    target_conn = c
+                    break
+        if target_conn:
+            try:
+                target_conn.sendall(f"FILE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
+            except:
+                pass
+
 # ------------------- XỬ LÝ CLIENT -------------------
 def handle_client(conn, addr):
     print(f"[NEW CONNECTION] {addr}")
@@ -195,6 +222,8 @@ def handle_client(conn, addr):
                     handle_private(parts, conn)
                 elif cmd == "IMG":
                     handle_image(parts, conn)
+                elif cmd == "FILE":
+                    handle_file(parts, conn)
                 else:
                     conn.sendall(f"ERR|Unknown command {cmd}\n".encode("utf-8"))
     except Exception as e:

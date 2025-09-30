@@ -187,28 +187,43 @@ class ChatGUI:
                                          font=("Arial", 12, "bold"), bg="#ddd", anchor="w")
         self.chat_header_name.pack(side="left", padx=5)
 
-        # Canvas chat
-        self.chat_canvas = tk.Canvas(self.chat_frame, bg="#f5f5f5", highlightthickness=0)
-        self.chat_scrollbar = tk.Scrollbar(self.chat_frame, orient="vertical", command=self.chat_canvas.yview)
+        # --- Khung hiển thị tin nhắn ---
+        chat_display = tk.Frame(self.chat_frame, bg="#f5f5f5")
+        chat_display.pack(fill="both", expand=True)
+
+        self.chat_canvas = tk.Canvas(chat_display, bg="#f5f5f5", highlightthickness=0)
+        self.chat_scrollbar = tk.Scrollbar(chat_display, orient="vertical", command=self.chat_canvas.yview)
         self.chat_canvas.configure(yscrollcommand=self.chat_scrollbar.set)
 
-        self.chat_scrollbar.pack(side="right", fill="y")
         self.chat_canvas.pack(side="left", fill="both", expand=True)
+        self.chat_scrollbar.pack(side="right", fill="y")
 
         self.chat_inner = tk.Frame(self.chat_canvas, bg="#f5f5f5")
-        self.chat_canvas.create_window((0, 0), window=self.chat_inner, anchor="nw")
-        self.chat_inner.pack(fill="both", expand=True)  # <-- thêm
-        self.chat_canvas.pack(fill="both", expand=True)  # <-- thêm
-        self.chat_inner.bind("<Configure>", lambda e: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all")))
 
-        # Ô nhập tin nhắn
-        frame_bottom = tk.Frame(self.root, bg="#ddd")
-        frame_bottom.pack(fill="x", padx=5, pady=5)
+        # Gán ID để có thể config lại width sau này
+        self.chat_window = self.chat_canvas.create_window((0, 0), window=self.chat_inner, anchor="nw")
+
+        # Khi canvas thay đổi kích thước, cập nhật width cho chat_inner
+        def resize_inner(event):
+            self.chat_canvas.itemconfig(self.chat_window, width=event.width)
+
+        self.chat_canvas.bind("<Configure>", resize_inner)
+
+        self.chat_inner.bind(
+            "<Configure>",
+            lambda e: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all"))
+        )
+
+        # --- Khung nhập tin nhắn ---
+        frame_bottom = tk.Frame(self.chat_frame, bg="#ddd", height=45)
+        frame_bottom.pack(fill="x", side="bottom")
+        frame_bottom.pack_propagate(False)
 
         self.entry_msg = tk.Entry(frame_bottom, font=("Arial", 12))
-        self.entry_msg.pack(side="left", fill="x", expand=True, padx=5)
+        self.entry_msg.pack(side="left", fill="x", expand=True, padx=5, ipady=3)
 
-        btn_send = tk.Button(frame_bottom, text="Gửi", command=self.send_message, bg="#6a5acd", fg="white")
+        btn_send = tk.Button(frame_bottom, text="Gửi", command=self.send_message,
+                             bg="#6a5acd", fg="white")
         btn_send.pack(side="left", padx=5)
 
         btn_img = tk.Button(frame_bottom, text="📷 Ảnh", command=self.send_image)
@@ -217,7 +232,9 @@ class ChatGUI:
         btn_file = tk.Button(frame_bottom, text="📂 File", command=self.send_file)
         btn_file.pack(side="left", padx=5)
 
-        # Nếu đã nhận danh sách user trước đó thì hiển thị luôn
+
+
+# Nếu đã nhận danh sách user trước đó thì hiển thị luôn
         if self.pending_users:
             self.update_user_list(self.pending_users)
             self.pending_users = []
@@ -395,7 +412,7 @@ class ChatGUI:
     def show_full_image(self, filepath):
         if not os.path.exists(filepath):
             return
-        top = Toplevel(self.root)
+        top = tk.Toplevel(self.root)
         top.title("Xem ảnh")
         img = Image.open(filepath)
         photo = ImageTk.PhotoImage(img)
@@ -615,6 +632,51 @@ class ChatGUI:
 
             self.root.after(0, show_img)
 
+        if msg.startswith("FILE|"):
+            try:
+                _, sender, filename, b64_data = msg.split("|", 3)
+            except ValueError:
+                return
+
+            # Lưu vào bộ nhớ tạm
+            if not hasattr(self, "pending_files"):
+                self.pending_files = {}
+            self.pending_files[(sender, filename)] = b64_data
+
+            def show_file():
+                # Container cho message
+                outer_frame = tk.Frame(self.chat_frames.get(sender, self.chat_inner), bg="#f5f5f5")
+                outer_frame.pack(fill="x", pady=5, padx=10)
+
+                msg_container = tk.Frame(outer_frame, bg="#f5f5f5")
+                msg_container.pack(anchor="w")
+
+                # Avatar
+                avatar_img = self.create_circle_avatar(self.user_avatars.get(sender, "avatars/default.jpg"), size=36)
+                lbl_avatar = tk.Label(msg_container, image=avatar_img, bg="#f5f5f5")
+                lbl_avatar.image = avatar_img
+                lbl_avatar.pack(side="left", padx=5)
+
+                # Nút tải xuống
+                def download_file():
+                    save_dir = Path("downloads")
+                    save_dir.mkdir(exist_ok=True)
+                    save_path = save_dir / filename
+                    data = base64.b64decode(self.pending_files[(sender, filename)])
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+                    messagebox.showinfo("Download", f"File {filename} đã lưu tại {save_path}")
+
+                btn_file = tk.Button(
+                    msg_container,
+                    text=f"📂 {filename} (Tải xuống)",
+                    command=download_file,
+                    relief="flat",
+                    bg="#e6e6e6"
+                )
+                btn_file.pack(side="left")
+
+            self.root.after(0, show_file)
 
     # fallback: show raw server text in an "ALL" conversation (or server frame)
         # self.root.after(0, lambda: self.show_message("Server", msg, target_user="ALL"))

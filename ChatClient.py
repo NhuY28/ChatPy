@@ -1,8 +1,10 @@
 # Chat Client.py
 import socket
 import threading
+import base64, os
 
 class ChatClient:
+    # def __init__(self, host="10.236.156.24", port=2025):
     def __init__(self, host="127.0.0.1", port=2025):
         self.host = host
         self.port = port
@@ -26,6 +28,16 @@ class ChatClient:
 
     def send_message(self, text):
         self.send(f"MSG|{text}\n")
+
+    def send_file(self, target, filepath):
+        try:
+            with open(filepath, "rb") as f:
+                data = f.read()
+            b64_data = base64.b64encode(data).decode("utf-8")
+            filename = os.path.basename(filepath)
+            self.send(f"FILE|{target}|{filename}|{b64_data}\n")
+        except Exception as e:
+            print("[send_file ERROR]", e)
 
     def send_private_message(self, target, text):
         self.send(f"PRIVATE|{target}|{text}\n")
