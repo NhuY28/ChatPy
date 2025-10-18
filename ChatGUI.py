@@ -234,7 +234,7 @@ class ChatGUI:
 
 
 
-# Nếu đã nhận danh sách user trước đó thì hiển thị luôn
+        # Nếu đã nhận danh sách user trước đó thì hiển thị luôn
         if self.pending_users:
             self.update_user_list(self.pending_users)
             self.pending_users = []
