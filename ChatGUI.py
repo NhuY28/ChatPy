@@ -14,7 +14,7 @@ import io
 import pygame
 import wave
 from VoiceCall import VoiceCall
-
+from VideoCall import VideoCall
 
 from pathlib import Path
 from tkinter import messagebox, filedialog
@@ -227,6 +227,19 @@ class ChatGUI:
                 command=self.start_call  # hàm bạn sẽ tự định nghĩa ở dưới
         )
         btn_call.pack(side="right", padx=10, pady=5)
+
+        btn_video = tk.Button(
+            self.chat_header,
+            text="📹 Video",
+            bg="#4CAF50",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            command=self.start_video_call  # hàm bạn sẽ tự định nghĩa ở dưới
+        )
+        btn_video.pack(side="right", padx=10, pady=5)
+
 
         # --- Khung hiển thị tin nhắn ---
         chat_display = tk.Frame(self.chat_frame, bg="#f5f5f5")
@@ -1030,6 +1043,50 @@ class ChatGUI:
             print("Lỗi khi bắt đầu cuộc gọi:", e)
             messagebox.showerror("Lỗi", f"Không thể bắt đầu cuộc gọi: {e}")
 
+    def start_video_call(self):
+        """Bắt đầu cuộc gọi video"""
+        # Kiểm tra client đã đăng nhập chưa
+        if not hasattr(self, "client") or not self.client:
+            messagebox.showwarning("Video Call", "Chưa kết nối tới server!")
+            return
+
+        # Kiểm tra xem người dùng có đang chọn ai để gọi chưa
+        target_user = getattr(self, "current_chat_user", None)
+        if not target_user:
+            messagebox.showwarning("Video Call", "Vui lòng chọn người để gọi trước!")
+            return
+
+        # Import VideoCall (file riêng)
+        try:
+            from VideoCall import VideoCall
+        except ImportError:
+            messagebox.showerror("Lỗi", "Không tìm thấy file VideoCall.py!")
+            return
+
+        # Gửi tín hiệu gọi đến người kia
+        try:
+            self.client.send(f"VIDEO_REQUEST|{target_user}\n")
+        except Exception as e:
+            print("Không gửi được VIDEO_REQUEST:", e)
+
+        # Mở cửa sổ gọi video
+        try:
+            self.video_call = VideoCall(self.client, target_user, parent=self.root)
+            self.video_call.start()
+        except Exception as e:
+            print("Lỗi khi bắt đầu cuộc gọi video:", e)
+            messagebox.showerror("Lỗi", f"Không thể bắt đầu cuộc gọi video: {e}")
+
+    def show_video_call_request(self, caller):
+        if messagebox.askyesno("Video Call", f"{caller} đang gọi video bạn, chấp nhận?"):
+            from VideoCall import VideoCall
+            self.video_call = VideoCall(self.client, caller, parent=self.root)
+            self.video_call.start()
+            # Gửi tín hiệu đồng ý
+            self.client.send(f"VIDEO_ACCEPT|{caller}\n")
+        else:
+            self.client.send(f"VIDEO_DECLINE|{caller}\n")
+
     # ------------------- Avatar hình tròn -------------------
     def create_circle_avatar(self, path, size=40):
         if not os.path.exists(path):
@@ -1285,17 +1342,23 @@ class ChatGUI:
             self.user_groups = groups  # lưu lại để dùng sau
 
             def update_group_list():
-                # Giữ nguyên frame danh sách user, chỉ thêm nhóm vào
+                # Kiểm tra chat_inner đã tồn tại chưa
+                if not hasattr(self, 'chat_inner') or self.chat_inner is None:
+                    print("Warning: chat_inner chưa được tạo. Bỏ qua update_group_list tạm thời.")
+                    return
+
+                # Thêm nhóm mới
                 for g in groups:
                     if g not in self.chat_frames:
                         frame = tk.Frame(self.chat_inner, bg="#f5f5f5")
+                        frame.pack(fill="x", pady=2)  # đừng quên pack
                         self.chat_frames[g] = frame
 
-                # Cập nhật hiển thị
+                # Cập nhật hiển thị user
                 self.update_user_list(self.current_users)
 
             self.root.after(0, update_group_list)
-            return
+
 
         if msg.startswith("IMG|"):
             try:
@@ -1492,6 +1555,19 @@ class ChatGUI:
             if hasattr(self, "voice_call") and self.voice_call:
                 self.voice_call.end()
             return
+
+        if msg.startswith("VIDEO_REQUEST|"):
+            user = msg.split("|")[1]
+            self.show_video_call_request(user)  # hiển thị popup: có muốn nhận video call không
+        elif msg.startswith("VIDEO_STREAM|"):
+            # VIDEO_STREAM|sender|b64video|b64audio
+            parts = msg.split("|", 4)
+            sender, b64video, b64audio = parts[1:4]
+            if hasattr(self, 'video_call') and self.video_call:
+                self.video_call.receive_video(b64video, b64audio)
+        elif msg.startswith("VIDEO_END|"):
+            if hasattr(self, 'video_call') and self.video_call:
+                self.video_call.end()
 
         if msg.startswith("GROUP_MSG|"):
             try:

@@ -8,7 +8,7 @@ class ChatClient:
         self.port = port
         self.sock = None
         self.running = False
-        self.on_message = None   # callback: msg từ server
+        self.on_message = None  # callback: msg từ server
         # -------------------------------
         self.group_unread_count = {}  # {group_name: số tin nhắn chưa đọc}
         self.open_groups = set()      # nhóm đang mở

@@ -319,6 +319,108 @@ def handle_call_end(parts, conn):
         except:
             pass
 
+# ------------------- VIDEO CALL -------------------
+def handle_video_request(parts, conn):
+    # parts: ["VIDEO_REQUEST", target]
+    if len(parts) < 2:
+        return
+    target = parts[1]
+    sender = clients[conn]["username"]
+
+    target_conn = None
+    with clients_lock:
+        for c, info in clients.items():
+            if info["username"] == target:
+                target_conn = c
+                break
+
+    if target_conn:
+        try:
+            target_conn.sendall(f"VIDEO_REQUEST|{sender}\n".encode("utf-8"))
+        except:
+            pass
+
+
+def handle_video_accept(parts, conn):
+    # parts: ["VIDEO_ACCEPT", target]
+    if len(parts) < 2:
+        return
+    target = parts[1]
+    sender = clients[conn]["username"]
+
+    target_conn = None
+    with clients_lock:
+        for c, info in clients.items():
+            if info["username"] == target:
+                target_conn = c
+                break
+
+    if target_conn:
+        try:
+            target_conn.sendall(f"VIDEO_ACCEPT|{sender}\n".encode("utf-8"))
+        except:
+            pass
+
+
+def handle_video_decline(parts, conn):
+    if len(parts) < 2:
+        return
+    target = parts[1]
+    sender = clients[conn]["username"]
+    target_conn = None
+    with clients_lock:
+        for c, info in clients.items():
+            if info["username"] == target:
+                target_conn = c
+                break
+    if target_conn:
+        try:
+            target_conn.sendall(f"VIDEO_DECLINE|{sender}\n".encode("utf-8"))
+        except:
+            pass
+
+
+def handle_video_stream(parts, conn):
+    # parts: ["VIDEO_STREAM", target, b64_video, b64_audio]
+    if len(parts) < 4:
+        return
+    target = parts[1]
+    b64_video = parts[2]
+    b64_audio = parts[3]
+    sender = clients[conn]["username"]
+
+    target_conn = None
+    with clients_lock:
+        for c, info in clients.items():
+            if info["username"] == target:
+                target_conn = c
+                break
+
+    if target_conn:
+        try:
+            target_conn.sendall(f"VIDEO_STREAM|{sender}|{b64_video}|{b64_audio}\n".encode("utf-8"))
+        except:
+            pass
+
+def handle_video_end(parts, conn):
+    if len(parts) < 2:
+        return
+    target = parts[1]
+    sender = clients[conn]["username"]
+
+    target_conn = None
+    with clients_lock:
+        for c, info in clients.items():
+            if info["username"] == target:
+                target_conn = c
+                break
+
+    if target_conn:
+        try:
+            target_conn.sendall(f"VIDEO_END|{sender}\n".encode("utf-8"))
+        except:
+            pass
+
 # ------------------- GROUP CHAT -------------------
 # --- Load groups từ DB khi khởi động ---
 def load_groups_from_db():
@@ -591,6 +693,16 @@ def handle_client(conn, addr):
                     handle_call_stream(parts, conn)
                 elif cmd == "CALL_END":
                     handle_call_end(parts, conn)
+                elif cmd == "VIDEO_REQUEST":
+                    handle_video_request(parts, conn)
+                elif cmd == "VIDEO_ACCEPT":
+                    handle_video_accept(parts, conn)
+                elif cmd == "VIDEO_DECLINE":
+                    handle_video_decline(parts, conn)
+                elif cmd == "VIDEO_STREAM":
+                    handle_video_stream(parts, conn)
+                elif cmd == "VIDEO_END":
+                    handle_video_end(parts, conn)
                 elif cmd == "GROUP_CREATE":
                     handle_group_create(parts, conn)
                 elif cmd == "GROUP_MSG":
