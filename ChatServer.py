@@ -4,6 +4,9 @@ import threading
 import pymysql
 import os
 import base64
+import tkinter as tk
+from tkinter.scrolledtext import ScrolledText
+
 
 HOST = "0.0.0.0"
 PORT = 2025
@@ -41,6 +44,11 @@ def send_user_list():
                 c.sendall(msg.encode("utf-8"))
             except:
                 pass
+
+        # --- Cập nhật Listbox GUI ---
+        user_listbox.delete(0, tk.END)
+        for info in clients.values():
+            user_listbox.insert(tk.END, info['username'])
 
 # ------------------- REGISTER -------------------
 def handle_register(parts, conn):
@@ -177,6 +185,7 @@ def handle_image(parts, conn):
                         c.sendall(f"IMG|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                     except Exception as e:
                         print("[BROADCAST IMG ERROR]", e)
+                        gui_log(f"[BROADCAST IMG ERROR] {e}")
     else:
         # private
         target_conn = None
@@ -190,6 +199,7 @@ def handle_image(parts, conn):
                 target_conn.sendall(f"IMG|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
             except Exception as e:
                 print("[PRIVATE IMG ERROR]", e)
+                gui_log(f"[PRIVATE IMG ERROR] {e}")
 
 
 def handle_file(parts, conn):
@@ -206,6 +216,7 @@ def handle_file(parts, conn):
                         c.sendall(f"FILE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                     except Exception as e:
                         print("[BROADCAST FILE ERROR]", e)
+                        gui_log(f"[BROADCAST FILE ERROR] {e}")
     else:
         target_conn = None
         with clients_lock:
@@ -218,6 +229,7 @@ def handle_file(parts, conn):
                 target_conn.sendall(f"FILE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
             except Exception as e:
                 print("[PRIVATE FILE ERROR]", e)
+                gui_log(f"[PRIVATE FILE ERROR] {e}")
 
 
 def handle_voice(parts, conn):
@@ -234,6 +246,7 @@ def handle_voice(parts, conn):
                         c.sendall(f"VOICE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                     except Exception as e:
                         print("[BROADCAST VOICE ERROR]", e)
+                        gui_log(f"[BROADCAST VOICE ERROR] {e}")
     else:
         target_conn = None
         with clients_lock:
@@ -246,6 +259,7 @@ def handle_voice(parts, conn):
                 target_conn.sendall(f"VOICE|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
             except Exception as e:
                 print("[PRIVATE VOICE ERROR]", e)
+                gui_log(f"[PRIVATE VOICE ERROR] {e}")
 
 def handle_call_request(parts, conn):
     # parts: ["CALL_REQUEST", target]
@@ -433,10 +447,11 @@ def load_groups_from_db():
             members = row["members"].split(",")
             groups[name] = members
         print(f"[INIT] Đã tải {len(groups)} nhóm từ database.")
+        gui_log(f"[INIT] Đã tải {len(groups)} nhóm từ database.")
     except Exception as e:
         print("[DB ERROR] Không thể load nhóm:", e)
+        gui_log(f"[DB ERROR] Không thể load nhóm: {e}")
 
-load_groups_from_db()
 
 def handle_group_create(parts, conn):
     if len(parts) < 3:
@@ -455,6 +470,7 @@ def handle_group_create(parts, conn):
     # Thêm nhóm vào dictionary
     groups[group_name] = members
     print(f"[GROUP_CREATE] {sender} tạo nhóm {group_name} với: {members}")
+    gui_log(f"[GROUP_CREATE] {sender} tạo nhóm {group_name} với: {members}")
 
     # --- Lưu vào DB ---
     try:
@@ -467,6 +483,7 @@ def handle_group_create(parts, conn):
         del groups[group_name]
         conn.sendall(f"GROUP_CREATE_FAIL|{e}\n".encode("utf-8"))
         print("[DB ERROR] Không thể lưu nhóm:", e)
+        gui_log(f"[DB ERROR] Không thể lưu nhóm: {e}")
         return
 
     # --- Gửi danh sách nhóm cập nhật cho tất cả thành viên ---
@@ -503,7 +520,7 @@ def handle_group_msg(parts, conn):
         db.commit()
     except Exception as e:
         print("[DB ERROR] Không thể lưu tin nhắn nhóm:", e)
-
+        gui_log(f"[DB ERROR] Không thể lưu tin nhắn nhóm: {e}")
     # --- Gửi tin nhắn cho tất cả thành viên trong nhóm ---
     with clients_lock:
         for c, info in clients.items():
@@ -597,6 +614,8 @@ def handle_group_image(parts, conn):
                     c.sendall(f"{tag}|{group_name}|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                 except Exception as e:
                     print("[GROUP_IMG ERROR]", e)
+                    gui_log(f"[GROUP_IMG ERROR] {e}")
+
 def handle_group_file(parts, conn):
     if len(parts) < 4:
         return
@@ -615,6 +634,7 @@ def handle_group_file(parts, conn):
                     c.sendall(f"{tag}|{group_name}|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                 except Exception as e:
                     print("[GROUP_FILE ERROR]", e)
+                    gui_log(f"[GROUP_FILE ERROR] {e}")
 def handle_group_voice(parts, conn):
     if len(parts) < 4:
         return
@@ -633,10 +653,12 @@ def handle_group_voice(parts, conn):
                     c.sendall(f"{tag}|{group_name}|{sender}|{filename}|{b64_data}\n".encode("utf-8"))
                 except Exception as e:
                     print("[GROUP_VOICE ERROR]", e)
+                    gui_log(f"[GROUP_VOICE ERROR] {e}")
 
 # ------------------- XỬ LÝ CLIENT -------------------
 def handle_client(conn, addr):
     print(f"[NEW CONNECTION] {addr}")
+    gui_log(f"[NEW CONNECTION] {addr}")
     buffer = ""
     try:
         while True:
@@ -719,23 +741,80 @@ def handle_client(conn, addr):
                     conn.sendall(f"ERR|Unknown command {cmd}\n".encode("utf-8"))
     except Exception as e:
         print("[ERROR]", e)
+        gui_log(f"[ERROR] {e}")
     finally:
         with clients_lock:
             if conn in clients:
                 print(f"[DISCONNECT] {clients[conn]['username']} left.")
+                gui_log(f"[DISCONNECT] {clients[conn]['username']} left.")
                 del clients[conn]
                 send_user_list()
         conn.close()
 
 # ------------------- KHỞI ĐỘNG SERVER -------------------
-def start_server():
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.bind((HOST, PORT))
-    server.listen(5)
-    print(f"[STARTED] Server running on {HOST}:{PORT}")
-    while True:
-        conn, addr = server.accept()
-        threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+server_socket = None  # biến toàn cục để dừng server
 
-if __name__ == "__main__":
-    start_server()
+def gui_log(message):
+    log_text.config(state='normal')
+    log_text.insert(tk.END, message + "\n")
+    log_text.see(tk.END)
+    log_text.config(state='disabled')
+
+def stop_server():
+    global server_socket
+    if server_socket:
+        try:
+            server_socket.close()
+            gui_log("[STOPPED] Server đã được tắt.")
+        except Exception as e:
+            gui_log(f"[STOP SERVER ERROR] {e}")
+        server_socket = None
+    else:
+        gui_log("[STOP SERVER] Server chưa khởi động.")
+
+def start_server():
+    global server_socket
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((HOST, PORT))
+    server_socket.listen(5)
+    print(f"[STARTED] Server running on {HOST}:{PORT}")
+    gui_log(f"[STARTED] Server running on {HOST}:{PORT}")
+
+    try:
+        while True:
+            conn, addr = server_socket.accept()
+            threading.Thread(target=handle_client, args=(conn, addr), daemon=True).start()
+    except OSError:
+        gui_log("[STOPPED] Server đã dừng.")
+
+def start_server_thread():
+    threading.Thread(target=start_server, daemon=True).start()
+
+
+# --- KHỞI TẠO GUI ---
+root = tk.Tk()
+root.title("Chat Server GUI")
+root.geometry("600x400")
+
+# ------------------- GUI BUTTONS (đặt lên đầu) -------------------
+button_frame = tk.Frame(root)
+button_frame.pack(fill="x", pady=5)
+
+start_btn = tk.Button(button_frame, text="Start Server", command=start_server_thread, bg="#4CAF50", fg="white")
+start_btn.pack(side="left", expand=True, fill="x", padx=5)
+
+stop_btn = tk.Button(button_frame, text="Stop Server", command=stop_server, bg="#F44336", fg="white")
+stop_btn.pack(side="left", expand=True, fill="x", padx=5)
+
+# Text widget hiển thị log
+log_text = ScrolledText(root, state='disabled', height=15)
+log_text.pack(fill='both', expand=True, pady=5)
+
+# Listbox hiển thị user online
+user_listbox = tk.Listbox(root)
+user_listbox.pack(fill='x', pady=5)
+
+load_groups_from_db()
+
+# ------------------- MAIN LOOP -------------------
+root.mainloop()
